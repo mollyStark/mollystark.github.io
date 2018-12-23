@@ -1,6 +1,6 @@
 language: node_js
 node_js:
-- '6.0.0'
+- 6.0.0
 branches:
   only:
   - source
@@ -16,7 +16,7 @@ after_success:
 - git config --global user.name "Molly Stark"
 - git config --global user.email "menglei0318@gmail.com"
 - sed -i'' "/^ *repo/s~github\.com~${GH_TOKEN}@github.com~" _config.yml
-- hexo deploy --silent
+- hexo deploy
 env:
   global:
-    secure: Xka8Qu+c0OzWZp+cw/4XCrqyAm8IShPf+xFXiAo5hJAII0iqCfbNXo+4z8PPoG/lXGMjipeccqThGyY5K6dIgJ0oqDjj1wRk5VJ5au4cneLBH7t2HhC9T0nAodwZrmuDAQjYlNtty1pM3X9PRmcQDTaDGkAJI57V0/Yv6KFDwpH2t5TkrBiuFeYJA4SjupvHbvZYuzXi7chWac3SkTtbsH4uKh+erVevJ1pipY0BYodiM5aZftc6Vde2mYhsEH4ViE96h3i/NNqSBR6MOfEn/FWMuUrtRHIaU1CcuJN9TEdabls2XsejwCpkSLuNQamITqcAoTrZaGxTOMIMHeNOXWg26BSDowUtG6jHquQe6JvCB72A7Yq+NIjWvkbaNfM5gV38nwJx3XmdYJpJMee3DEoya+bS6VpwIUfwQPpOr3H9I/FdS3v2peCkpNFvXpjKZXDhwrGiztyFNKhm1oMRdAsJDJ+nVVHfAKuPT4UbMqco0ANg0L4uAL1laTucpQFMlOAHcCWk9SBQy5ti98nkeSKAdpQDj8Bi1AmKr3yO81pLNyYl9Gj4nYxqNaGOIG9Skfftt5nqAc21ENF6gIQzStgeHHOgDFEN2/j+s555MzND2nDYdAKod1fE4/oSkGttcaIq84okVqBS8gp4OcYLt7cDd94PXllxbVWs6DGeEZY=
+    secure: RFeIZkOoiLOsksjnplI5+mju3j1t9ad7Sv+edP3De1xN4OIxeC0E0a05EBT7U60ikjJOPnDEazD1k8FRKCvagPAJk+CP1VHMwMHkDSdmlCCh6YbVRQjeTGqrW3j+1FEPR05hiELJOmNXLHze2/PCBA7SyTw7t0ydE9K7LGkm0MQA5NvjJULgtzoUzbBlfzYQC572tvcOXYtfMe3Sn+CgcvOJbzCkgqkYIzcJlWtsca5U2Jo+Bl4lEIx+b//vsPmX1dBsghNkJogMEZ0Pk3KkGZjdixicxOc3p58Zd+Xemty4hLDRotzY3XZnHVynaXYQWxhMRgED0hxG0EhqIqPXKYmHc4oI1D49zGkRlNWNPidQnE0gcB9/kNbYoHctZR+4eyVWr0Nfi/XhREzC7s2EuRMQBDAQ7/mtgGs8mBkt7aqeyrI0fWjDRbXRLQArBVEpZbGLTLlJfZtyELTWTsWcheOTKtmKllxUHz6ZOZQxeKyzjPRzSTcHM7nZSLhhAhaNf3EumPJonj9Eri5a5IDv2e3lrGPD2xkBrtXuWAeXxm1xaqRirtYh6lmoDq7Fj7d3zpoAGXiUGwYQCe/jC5b8EOFpH2Iv1Xootzrw2+CcpEKTcSzakiEl6T0SlwqcPhOGUsePW+nfKzbXpPNH2gsnMCqJ9M5rIdIGI8B9omqN9r4=
