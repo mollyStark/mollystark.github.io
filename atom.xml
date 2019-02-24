@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>成长的烦恼</title>
+  
+  <subtitle>Molly 的博客</subtitle>
+  <link href="/atom.xml" rel="self"/>
+  
+  <link href="http://mollystark.github.io/"/>
+  <updated>2019-02-24T14:33:03.883Z</updated>
+  <id>http://mollystark.github.io/</id>
+  
+  <author>
+    <name>Molly Wang</name>
+    
+  </author>
+  
+  <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title>faster-rcnn源码解读－RPN</title>
+    <link href="http://mollystark.github.io/2019/faster-rcnn%E6%BA%90%E7%A0%81%E8%A7%A3%E8%AF%BB%EF%BC%8DRPN/"/>
+    <id>http://mollystark.github.io/2019/faster-rcnn源码解读－RPN/</id>
+    <published>2019-01-21T17:18:47.000Z</published>
+    <updated>2019-02-24T14:33:03.883Z</updated>
+    
+    <content type="html"><![CDATA[<p>faster-rcnn是经典的图片检测模型，在这个模型中，首次提出了RPN(region proposalnetwork)这个网络结构，用来生成候选区域。这个任务之前使用一些独立检测方案，RPN首次使用神经网络去训练，从而使整个检测方案是端到端(end-to-end)的实现方式。这篇文章主要解读了faster-rcnn中RPN相关的代码。</p><h2 id="rpn网络结构"><a class="header-anchor" href="#rpn网络结构"></a>RPN网络结构</h2><p>RPN网络是用来生成候选框的网络，前承CNN网络的特征抽取部分，后接更具体的分类和回归模型，输入是CNN卷积层抽取的图片高维特征，输出是n个正例检测框和m个负例检测框。</p><p>我们可以结合<code>py-faster-rcnn</code>中的prototxt文件画出faster-rcnn网络的整体结果图和具体的rpn的结构图。</p><img src="/2019/faster-rcnn源码解读－RPN/rpn-Page-1.png" title="faster-rcnn网络结构图"><p>faster-rcnn整体网络结构</p><img src="/2019/faster-rcnn源码解读－RPN/rpn-Page-2.png" title="RPN网络结构图"><p>RPN网络结构</p><p>在卷积网络之后，RPN网络首先是又用了两层卷积网络，得到前背景二分类的分类结果和坐标回归结果，输出大小分别是2x9 , 4x9 ，9代表了每个框anchor的种类数（下文会讲到），2是分类数（0/1），4是坐标数（x1, y1, x2, y2）。</p><p>然后连接了<code>anchor_target_layer</code>，筛选和groundTruth匹配的anchors样本，然后后面是softmaxWithLoss层和smoothL1Loss层计算这些anchors的分类和回归损失，以学习和优化RPN的提取。</p><p>另一方面，在RPN的卷积层后连接了<code>proposal_layer</code>层，根据前面分类的结果筛选分类样本，然后连接<code>proposal_target_layer</code>层，生成训练样本和训练目标，接到后面的fc层等优化loss。</p><p>这几个层都是用python接口写的，下面，具体结合代码看一下。</p><h2 id="rpn网络代码解析"><a class="header-anchor" href="#rpn网络代码解析"></a>RPN网络代码解析</h2><p>在faster-rcnn源码中，rpn网络相关的代码在lib/rpn目录下面，主要有这几个文件：</p><ol><li>generate_anchors.py：生成不同尺度不同大小的anchors。</li><li>anchor_target_layer.py：生成每个anchor的分类标签（0/1）和回归坐标。</li><li>proposal_layer.py：根据anchor的分类结果生成候选框集合（包括每个anchor的分类值和回归的坐标）。</li><li>proposal_target_layer.py：生成每个候选框的分类标签（0-k）和回归坐标。</li><li><a href="http://generate.py" target="_blank" rel="noopener">generate.py</a>：根据训练好的RPN网络生成检测候选集。</li></ol><p>这里面有两个概念，anchor和proposal，proposal很好理解，就是筛选出来的候选框，而anchor，是RPN网络的一个先验结构，可以认为是候选框有多大的限定。对于一张图片，RPN 认为需要检测的物体具有某些特定的长宽比，对这些特定的长宽比，又可以根据不同的尺度，即分辨率，得到不同的检测框，这些预先定好的检测框就被称为anchors，对这些anchors指定的区域特征进行分类和筛选，就得到proposals。</p><p>下面，我们分别来看这些代码，最后梳理出整个RPN的逻辑。</p><h3 id="generate-anchors-py"><a class="header-anchor" href="#generate-anchors-py"></a>generate_anchors.py</h3><p>这个文件用来生成不同大小不同分辨率的anchor框，主要的函数是<code>generate_anchors</code>。看一下它的代码：</p><figure class="highlight plain"><table><tr><td class="code"><pre><span class="line">def generate_anchors(base_size=16, ratios=[0.5, 1, 2],</span><br><span class="line">                     scales=2**np.arange(3, 6)):</span><br><span class="line">    &quot;&quot;&quot;</span><br><span class="line">    Generate anchor (reference) windows by enumerating aspect ratios X</span><br><span class="line">    scales wrt a reference (0, 0, 15, 15) window.</span><br><span class="line">    &quot;&quot;&quot;</span><br><span class="line"></span><br><span class="line">    base_anchor = np.array([1, 1, base_size, base_size]) - 1</span><br><span class="line">    ratio_anchors = _ratio_enum(base_anchor, ratios)</span><br><span class="line">    anchors = np.vstack([_scale_enum(ratio_anchors[i, :], scales)</span><br><span class="line">                         for i in xrange(ratio_anchors.shape[0])])</span><br><span class="line">    return anchors</span><br></pre></td></tr></table></figure><p>生成的步骤包括：</p><ol><li>生成一个左上坐标为(0, 0), 右下坐标为(15, 15) 的<code>base_anchor</code></li><li>基于<code>base_anchor</code>，用<code>_ratio_enum</code>方法生成不同尺寸的anchors，默认ratios是[0.5, 1, 2]，即3种尺寸的ratio，不同尺寸的生成框面积都是16x16，但长宽比不一样。</li><li>对上面每个尺寸的框，用<code>_scale_enum</code>方法再生成不同尺度的anchors，默认scales是[8, 16, 32]，不同scale生成的框长宽比不变，但是长宽绝对值变大相应的倍数。</li><li>将这些生成框排列起来（np.vstack()操作）。</li></ol><p>其中，<code>_ratio_enum</code>和<code>_scale_enum</code>中都有生成anchor的操作，具体方法是<code>_mkanchors</code>函数，根据中心点和长宽生成左上点和右下点的坐标。</p><h3 id="anchor-target-layer-py"><a class="header-anchor" href="#anchor-target-layer-py"></a>anchor_target_layer.py</h3><p>这个文件是一个类文件，继承自caffe的Layer类，caffe layer（后续简称caffe层）包括<code>setup</code>、<code>forward</code>和<code>backward</code>函数，其中<code>setup</code>方法用来初始化一些参数，<code>forward</code>方法定义根据输入生成输出的方法，是这一层操作的主要函数，其输出可以用做下一个caffe层的输入，而<code>backward</code>方法定义在反向传播时如何更新参数。</p><p><code>anchor_target_layer.py</code>目标是筛选生成的anchor，得到样本的分类标签（0/1）和标签为1的bbox的学习项，为后面计算loss提供数据。</p><p>首先<code>setup</code>函数将anchors坐标生成出来，<code>forward</code>函数输入是标注的框和图片信息，输出是筛选后的anchor，以及anchor的训练坐标和标签。</p><p>具体的方法做了这些事情：</p><ol><li>根据不同的anchors生成候选框，首先枚举了rpn分类featureMap中所有的坐标点，生成了对应原图尺寸的K*A个anchor，K是最后分类的个数，A是anchor的种类数目，即上面所说的3（不同ratio）*3（不同scale）=9个，然后保存在图像边界内的anchors。</li><li>计算出这些anchors和gt框的重叠，计算公式是</li><li>根据重叠筛选正负样本，即前背景的二分类样本，挑选规则如下：<ol><li>对每个ground truth，IoU值最大的anchor，标记为正样本，label=1</li><li>如果anchor box与ground truth的IoU大于某阈值，标记为正样本，label=1</li><li>如果anchor box与ground truth的IoU小于某阈值，标记为负样本，label=0</li><li>正负样本如果超过一定量，则做下采样。</li></ol></li><li>在挑选出正负样本后，计算回归的坐标差值，并对样本设置了权重，即<code>bbox_inside_weights</code>和<code>bbox_outside_weights</code>。</li><li>把采样的样本映射到原来的样本顺序(<code>_unmap</code>)，并填充<code>top</code>数据。</li></ol><h3 id="proposal-layer-py"><a class="header-anchor" href="#proposal-layer-py"></a>proposal_layer.py</h3><p><code>proposalLayer</code>也继承自caffe层，目标是根据分类结果生成候选框集合作为输出，<code>setup</code>函数和上面的<code>anchor_target_layer</code>类似，也是将anchors坐标生成出来，<code>forward</code>函数输入是rpn分类和回归的输出，以及原始图片信息，包含在<code>bottom</code>中，输出包含在<code>top</code>中，<code>top[0]</code>是筛选出的proposal的roi数据，<code>top[1]</code>是筛选出的proposal的分数。</p><p>具体的方法做了这些事情：</p><ol><li>根据不同的anchors生成候选框，首先枚举了所有的点，生成了K*A个anchor，K是最后分类的个数，A是anchor的种类数目，即上面所说的3（不同ratio）*3（不同scale）=9个，最后把bbox delta 和分类score都reshape到一样的维度。</li><li><code>bbox_transform_inv</code>函数根据anchor坐标和bbox delta生成proposal候选集坐标。</li><li><code>clip_boxes</code>函数修正超出图片大小的候选集的坐标。</li><li><code>_filter_boxes</code>把面积小于某个阈值的候选框筛选出去。</li><li>根据分类得分对候选框排序，得到分数最高的n个候选框。</li><li>应用nms(非极大值抑制)算法，得到分数最高的n个候选框。</li><li>将最后的候选框封装到<code>top</code>输出给下一层。</li></ol><h3 id="proposal-target-layer-py"><a class="header-anchor" href="#proposal-target-layer-py"></a>proposal_target_layer.py</h3><p><code>proposal_target_layer.py</code>也继承自caffe层，目标是为生成的proposal匹配分类标签(1-K) 和bbox坐标学习项。</p><p><code>forward</code>函数输入是<code>proposal_layer</code>的输出（即候选框区域），和要学习的标注框，输出是用作训练样本的标注框和相关的学习目标（坐标差值和分类类别）。</p><p>在<code>proposal_layer</code>后拿到待训练的候选框之后，需要给候选框分配相应的标注，因此，主要的函数就是<code>_sample_rois</code>这个函数。</p><p><code>_sample_rios</code>函数步骤：</p><ol><li>计算rois和gt_boxes的重叠区域。</li><li>挑选重叠区域大于FG_THRESH的前景并随机挑选一些作为正样本</li><li>挑选重叠区域小于BG_THRESH_HI且大于BG_THRESH_LO的背景并随机挑选一些作为负样本。</li><li>计算挑出来的样本的bbox_data和label。</li></ol><h3 id="generate-py"><a class="header-anchor" href="#generate-py"></a><a href="http://generate.py" target="_blank" rel="noopener">generate.py</a></h3><p>这个文件中有两个主要的函数<code>im_proposals</code>和<code>imdb_proposals</code>，分别是将图片数据和imdb数据传送到RPN网络得到候选集输出。这里就不详细展开了。</p><h2 id="总结"><a class="header-anchor" href="#总结"></a>总结</h2><p>根据rpn目录下的所有文件以及网络结构文件，我们再总结下rpn的框架脉络。rpn网络用来训练检测框的分类和提取，分别是用一个两层的CNN（共享第一层卷积）来做抽取，生成的维度是一个超参，也就是anchors的数量，loss是用<code>rpn_target_layer</code>筛选的样本和背景标注进行比对来计算。</p><p>rpn网络的分类和回归结果同时用来生成候选集proposals（<code>proposal_layer</code>和<code>proposal_target_layer</code>），然后用<code>ROIPooling</code>生成ROIs，对每一个ROI区域做了更高维的特征提取，用来做最终的分类检测和回归检测。</p>]]></content>
+    
+    <summary type="html">
+    
+      
+      
+        &lt;p&gt;faster-rcnn是经典的图片检测模型，在这个模型中，首次提出了RPN(region proposal
+network)这个网络结构，用来生成候选区域。这个任务之前使用一些独立检测方案，RPN
+首次使用神经网络去训练，从而使整个检测方案是端到端(end-to-end)的
+      
+    
+    </summary>
+    
+    
+      <category term="faster-rcnn" scheme="http://mollystark.github.io/tags/faster-rcnn/"/>
+    
+      <category term="rpn" scheme="http://mollystark.github.io/tags/rpn/"/>
+    
+  </entry>
+  
+  <entry>
+    <title>numpy operations</title>
+    <link href="http://mollystark.github.io/2019/numpy-operations/"/>
+    <id>http://mollystark.github.io/2019/numpy-operations/</id>
+    <published>2019-01-18T17:34:34.000Z</published>
+    <updated>2019-02-24T14:33:03.883Z</updated>
+    
+    <content type="html"><![CDATA[<p>Numpy 库是python中进行科学计算的基础包，如果用python去进行矩阵运算，肯定需要用到numpy库，最近在看faster-rcnn的源码，看到了很多numpy矩阵运算的操作，结合numpy的manual，这里做一个关于numpy运算的不定期记录和总结。</p><h2 id="numpy-的核心-ndarray-对象"><a class="header-anchor" href="#numpy-的核心-ndarray-对象"></a>numpy 的核心－ndarray 对象</h2><p>ndarray 是numpy里的核心类，封装了对$n$ 维矩阵的各种编译好的操作和方法。ndarray数组和python list的区别：</p><ol><li>ndarray中的元素必须在创建时指定大小，而python list是可以动态增长的。</li><li>ndarray中的元素必须属于相同的类型，而python list中的元素不需要。</li><li>ndarray进行大量数据的计算比list效率更高（接近c程序的速度）。</li><li>现在越来越多的库使用numpy作为底层的计算库。</li></ol><p>举个例子，如果要计算矩阵 $A$ 的元素和矩阵 $B$ 的元素相乘，那么在python里，我们需要这样写：</p><figure class="highlight plain"><table><tr><td class="code"><pre><span class="line">C = []</span><br><span class="line">for i in range(len(A)):</span><br><span class="line">    C[i] = A[i] * B[i]</span><br></pre></td></tr></table></figure><p>而使用 numpy 库，我们只需要一句话：</p><figure class="highlight plain"><table><tr><td class="code"><pre><span class="line">C = A * B</span><br></pre></td></tr></table></figure><p>是不是很简洁，就像是写数学公式一样。</p><p>当然上面语句可以运行的一个最简单的前提是：A和B的大小是一样的。在简洁的向量化的语法背后，其实有一些约定好的机制，定义了怎样的运算是被允许的，怎样是不被允许的。</p><h2 id="broadcasting机制"><a class="header-anchor" href="#broadcasting机制"></a>Broadcasting机制</h2><p>在numpy库中，<strong>所有</strong>的运算，包括代数计算，逻辑运算，位运算等等，都是隐式转换成一个元素一个元素的运算的。这个就是Broadcasting机制。所以，上面的运算可以成立，前提是要满足可以隐式扩展成一个元素对一个元素的方式。具体可以用这样两条匹配规则概括：两个矩阵，从最后一维开始往前推，</p><ol><li>两个维度相等，或者</li><li>某一个矩阵的这一维维度是1.</li></ol><p>对于两个矩阵的某一个维度的元素来说，若维度相等，那么元素是可以一一对应的，若维度不相等，但是有一个矩阵维度是1，那么维度是1的那个可以通过复制的方式扩展到另一个矩阵的相应维度，从而达到元素一一对应的效果。</p><p>举个例子，</p><figure class="highlight plain"><table><tr><td class="code"><pre><span class="line">&gt;&gt;&gt; import numpy as np</span><br><span class="line">&gt;&gt;&gt; x = np.array([[1, 2, 3], [4, 5, 6]])</span><br><span class="line">&gt;&gt;&gt; y = np.array([7, 8, 9])</span><br><span class="line">&gt;&gt;&gt; x + y</span><br><span class="line">array([[ 8, 10, 12],</span><br><span class="line">       [11, 13, 15]])</span><br></pre></td></tr></table></figure><p>x是一个大小为（2， 3）的矩阵，而y的大小是（1， 3），从后往前看维度信息，最后一维都是3，是满足条件的，然后第一维y的维度是1，因此也满足条件，最后加法的效果就相当于把y数组拷贝了一行[7, 8, 9]与x相加。</p><p>当然，实际上，numpy并没有真的进行数组的拷贝，否则数组一大，就会有空间上的巨大开销，上面所说的复制的方式都是一种便于理解的说法，而numpy其实是用了一种记录strides的trick去扩展数组而不过度的占用存储空间的。</p><p>底层实现是在nditer类用c代码实现的，但是我们可以在python中通过 <code>np.lib.stride_tricks</code> 里的方法来看一下是怎么进行broadcast的。</p><figure class="highlight plain"><table><tr><td class="code"><pre><span class="line"># 得到broadcast后的数组A和B</span><br><span class="line">&gt;&gt;&gt; A,B=np.lib.stride_tricks.broadcast_arrays(np.arange(6).reshape(2,3),</span><br><span class="line">...                                       np.array([[1],[2]]))</span><br><span class="line">&gt;&gt;&gt; A</span><br><span class="line">array([[0, 1, 2],</span><br><span class="line">       [3, 4, 5]])</span><br><span class="line">&gt;&gt;&gt; B</span><br><span class="line">array([[1, 1, 1],</span><br><span class="line">       [2, 2, 2]])</span><br><span class="line"></span><br><span class="line"># A的shape和strides, 说明数组A从第一维的第一个元素到第一维的第二个元素需要跳过24bytes的offset</span><br><span class="line">，也就是第二维的元素个数*每个元素的大小（3*8），而从第二维的第一个元素到第二维的第二个元素需要</span><br><span class="line">跳过8bytes的offset，也就是一个元素的大小。</span><br><span class="line">&gt;&gt;&gt; A.shape, A.strides</span><br><span class="line">((2, 3), (24, 8))</span><br><span class="line"></span><br><span class="line"># B的shape和strides，说明数组B从第一维的第一个元素到第一维的第二个元素需要跳过8bytes的offset</span><br><span class="line">，也就是第二维的真实元素个数1*每个元素的大小8bytes，而从第二维的第一个元素到第二维的第二个元素</span><br><span class="line">没有offset，就是还是这个元素，说明底层numpy并没有真的将数组进行拷贝复制。</span><br><span class="line">&gt;&gt;&gt; B.shape, B.strides</span><br><span class="line">((2, 3), (8, 0))</span><br></pre></td></tr></table></figure><p>上面的例子中，一个元素占用的内存是8字节，B虽然也是shape为(2, 3)的数组，但是它的strides是(8, 0)，通过shape和strides的组合，数组可以通过一种“虚拟”的方式扩展维度。</p>]]></content>
+    
+    <summary type="html">
+    
+      
+      
+        &lt;p&gt;Numpy 库是python中进行科学计算的基础包，如果用python去进行矩阵运算，肯定需要用到numpy库，最近在看faster-rcnn的源码，看到了很多numpy矩阵运算的操作，结合
+numpy的manual，这里做一个关于numpy运算的不定期记录和总结。&lt;/p&gt;
+      
+    
+    </summary>
+    
+    
+  </entry>
+  
+  <entry>
+    <title>系统调试</title>
+    <link href="http://mollystark.github.io/2019/%E7%B3%BB%E7%BB%9F%E8%B0%83%E8%AF%95/"/>
+    <id>http://mollystark.github.io/2019/系统调试/</id>
+    <published>2019-01-06T16:24:10.000Z</published>
+    <updated>2019-02-24T14:33:03.883Z</updated>
+    
+    <content type="html"><![CDATA[<p>当在本地或服务器上部署服务了以后，我们会希望程序或服务能最大化地利用系统，达到性能最优。要查看程序的性能，最关键的两个指标就是内存占用和cpu占用，拿到了这两个指标，我们再尽可能做程序的优化，或者不能优化的情况下，做一些平衡和取舍。</p><h2 id="cpu指标"><a class="header-anchor" href="#cpu指标"></a>cpu指标</h2><p>cpu占用情况代表了程序消耗的计算资源，我们可以通过</p><ol><li>nproc命令，查看机器的cpu个数，</li><li><a href="http://man7.org/linux/man-pages/man1/top.1.html" target="_blank" rel="noopener">top</a> 命令，查看机器的负载情况，包括1分钟的load，5分钟的load和15分钟的load，通常如果有8个cpu，那么load在8*1.5=12以内是可以接受的。</li></ol><h2 id="memory指标"><a class="header-anchor" href="#memory指标"></a>memory指标</h2><p>内存占用情况代表了程序消耗的内存资源，我们可以通过</p><ol><li>free命令，查看当前的内存消耗，包括总的内存，已经使用的内存，还可以使用的内存，cache，swap等，如果剩下的内存较少但是cache很多，还不要紧，后续使用时会从cache里再拿回来，如果剩下内存很少且swap基本占满了，说明程序太吃内存了，这时候就需要优化程序了。</li><li>top命令，上面的free是看总的情况，有时候我们一台服务器上跑了很多程序，想看是哪一个占用的多，就可以用top查看。</li></ol><h2 id="调优思路"><a class="header-anchor" href="#调优思路"></a>调优思路</h2><h3 id="找到问题"><a class="header-anchor" href="#找到问题"></a>找到问题</h3><p>我们通过查看机器和程序的cpu和内存占用情况，可以很快定位哪个程序，有什么样的缺陷，但现在只是有个粗略的定位，如果想减少cpu消耗或内存消耗，还需要继续深入到程序里去看哪一部分有问题。</p><h3 id="profile工具"><a class="header-anchor" href="#profile工具"></a>profile工具</h3><p>对python程序，可用的profile工具有自带的profile，line_profiler, memory_profiler<sup class="footnote-ref"><a href="#fn1" id="fnref1">[1]</a></sup>等。根据这些工具，我们可以测试每一个函数甚至每一行代码花的时间，占用的内存情况，从而找到问题在哪里。</p><h3 id="strace"><a class="header-anchor" href="#strace"></a>strace</h3><p>有的时候，程序可能卡在那里而不知道为什么，我们可以通过</p><figure class="highlight plain"><table><tr><td class="code"><pre><span class="line">strace -p PID</span><br></pre></td></tr></table></figure><p>查看进程在做什么，具体情况具体分析 <sup class="footnote-ref"><a href="#fn2" id="fnref2">[2]</a></sup>。</p><h2 id="小结"><a class="header-anchor" href="#小结"></a>小结</h2><p>这篇文章做了一个调试思路的总结，比较宽泛，其实每一个都有很多东西可以深挖，后面继续填坑吧。</p><hr class="footnotes-sep"><section class="footnotes"><ol class="footnotes-list"><li id="fn1" class="footnote-item"><p><a href="https://blog.csdn.net/xiemanr/article/details/72763234" target="_blank" rel="noopener">https://blog.csdn.net/xiemanr/article/details/72763234</a> <a href="#fnref1" class="footnote-backref">↩</a></p></li><li id="fn2" class="footnote-item"><p><a href="https://blog.csdn.net/flyingqr/article/details/70598693" target="_blank" rel="noopener">https://blog.csdn.net/flyingqr/article/details/70598693</a> <a href="#fnref2" class="footnote-backref">↩</a></p></li></ol></section>]]></content>
+    
+    <summary type="html">
+    
+      
+      
+        &lt;p&gt;当在本地或服务器上部署服务了以后，我们会希望程序或服务能最大化地利用系统，达到性能最优。要查看程序的性能，最关键的两个指标就是内存占用和cpu占用，拿到了这两个指标，我们再尽可能做程序的优化，或者不能优化的情况下，做一些平衡和取舍。&lt;/p&gt;
+&lt;h2 id=&quot;cpu指标&quot;&gt;&lt;
+      
+    
+    </summary>
+    
+    
+  </entry>
+  
+  <entry>
+    <title>understanding Cross Entrophy</title>
+    <link href="http://mollystark.github.io/2018/understanding-Cross-Entrophy/"/>
+    <id>http://mollystark.github.io/2018/understanding-Cross-Entrophy/</id>
+    <published>2018-12-22T21:04:10.000Z</published>
+    <updated>2019-02-24T14:33:03.883Z</updated>
+    
+    <content type="html"><![CDATA[<p>在我们使用Softmax将特征向量映射成概率值之后，我们需要一个指标来评价预测出来的概率值的好坏，通常，我们使用的就是cross-entrophy loss，即交叉熵损失。交叉熵损失的计算公式是：$ L = -(ylog\hat{y} + (1-y)log(1-\hat{y})) $。其中， $\hat{y}$ 表示预测出的概率值，而 $y$ 表示实际的分类标签值。</p><h2 id="直观理解"><a class="header-anchor" href="#直观理解"></a>直观理解</h2><p>我们已知的是现在真实的标签，假设这就是整体数据的分布，那么我们要让这个分布的概率最大，也就是说，当标签是 $y_i$ 时，我们让预测值 $\hat{y}$ 最大，可以表示成 $\hat{y}^{y_i}$ ，将每种可能的 $y_i$ 情况相乘，最终得到 $\hat{y}<sup>{y}*(1-\hat{y})</sup>{1-y}$ 这样的形式，然后对这个函数求$log$，最大化这个数 $L_{tmp}$ ，就是最小化 $-L_{tmp}=L=-(ylog\hat{y}+ (1-y)log(1-\hat{y})$，其实这就是极大似然的原理和推导过程。</p><p>但是为什么这个被叫做交叉熵损失呢？我们再尝试从熵的角度去理解这个损失所代表的含义。</p><h3 id="信息熵"><a class="header-anchor" href="#信息熵"></a>信息熵</h3><p>在理解交叉熵之前，我们先复习一下什么是熵。熵是香农信息论里的概念，表示的是信息的复杂度，或者信息量的大小。我们通常说的信息量大，其实就是说这件事的不确定性更大，平时发生的概率小，比如说刘恺威和杨幂离婚了！一个大瓜的那种感觉。</p><p>香农把这种感觉用了定量的方式去定义，我们传递信息需要用语言，用文字，如果认为有个码本去传递信息，那么熵就是在特定的概率分布 $p$ 下，传递所有事件所需要的最小的平均码长。平均码长越长，说明分布下的事件越复杂。比如，平均码长是0，那说明没有信息需要传递，事件发生的概率是1。</p><p>信息熵可以表示成 $H§=\sum_{x}p(x)*len(x)$ ，即 $x$ 发生的概率乘以它的编码长度，因为是最小的平均编码，那么需要当事件发生的概率大的时候，它的编码长度更小，这样总体的编码长度就小。这是一个直观想法，那怎么计算具体的编码长度 $len(x)$ 呢？</p><p>当我们进行变长编码的时候，我们需要保证每个编码是唯一的，且不能是其他编码的前缀，否则会出现解析的问题，比如二进制编码中，如果把1作为一个事件的编码，那么10,11, 100, 101, …, 全部不可以作为其他时间的编码。就像是，我们为了一颗树，放弃了这颗树背后的森林。假设编码长度是$L$，那么放弃的就是$\int_{L}^{\infty} \frac{1}{2^L} dL$ ，求出来是$\frac{1}{2^L}ln2$ ， 如果是以$e$为底，则就是$\frac{1}{2^L}$。因为当 $p(x)$ 越大的时候，我们越愿意放弃更多的森林来让总体的码长更短，因此另 $p(x)=\frac{1}{2^L}$，即码长 $L=log_{2}{\frac{1}{p(x)}}$。所以信息熵为：$ H§=\sum_xp(x)*log_2(\frac{1}{p(x)})$ 。</p><h3 id="交叉熵"><a class="header-anchor" href="#交叉熵"></a>交叉熵</h3><p>如果分布p和分布q传递相同的一些时间，但是事件发生的概率不同，在分布q中，我们依然用刚才根据分布p得出的码本，那么总的编码长度就是:$ H_{p}(q) = \sum_x{q(x) \log_2{\frac{1}{p(x)}} } $，即交叉熵，这个熵值越大，说明分布p和分布q的差距越大。回到我们最初的场景，我们知道真实标签$y$ 和计算出的分类概率$\hat{y}$，于是我们计算出在真实分布的情况下预测出的信息熵，即:$\sum_y{\log(\frac{1}{\hat{y}}) + (1-y) \log( \frac{1}{1-\hat{y}}) }$。我们要最小化这个信息熵，也就是使预测出来的概率分布接近于真实的概率分布。</p><h3 id="reference"><a class="header-anchor" href="#reference"></a>Reference</h3><p>[1] <a href="http://colah.github.io/posts/2015-09-Visual-Information/" target="_blank" rel="noopener">http://colah.github.io/posts/2015-09-Visual-Information/</a></p>]]></content>
+    
+    <summary type="html">
+    
+      
+      
+        &lt;p&gt;在我们使用Softmax将特征向量映射成概率值之后，我们需要一个指标来评价预测出来的概率值的好坏，通常，我们使用的就是cross-entrophy loss，即交叉熵损失。交叉熵损失的计算公式是：$ L = -(ylog\hat{y} + (1-y)log(1-\hat{y
+      
+    
+    </summary>
+    
+    
+  </entry>
+  
+  <entry>
+    <title>understanding Softmax in CNN</title>
+    <link href="http://mollystark.github.io/2018/understanding-Softmax/"/>
+    <id>http://mollystark.github.io/2018/understanding-Softmax/</id>
+    <published>2018-11-18T21:24:51.000Z</published>
+    <updated>2019-02-24T14:33:03.883Z</updated>
+    
+    <content type="html"><![CDATA[<p>Softmax层在CNN网络结构中经常放在全连接层后面，做为分类器，输出一个概率值向量。它主要用来进行多分类，形式简单，用一个公式$\frac{e<sup>{x}}{\sum_{i=1}</sup>{n}e^{x}}$计算，但是为什么是这样的形式呢？</p><h2 id="直观的理解方式"><a class="header-anchor" href="#直观的理解方式"></a>直观的理解方式</h2><p>首先，Softmax层的作用就是，将一个特征向量变成一个概率值向量。比如一幅图片，在经过卷积层以 后，得到一个特征向量，这个特征向量可以认为是输入的一种表示方法，然后经过Softmax层，对应到输出概率，这个输出概率的大小能反映出输入属于 哪种分类的概率最大。</p><p>这种将一个向量转换成概率向量的变换需要满足一些条件，</p><ol><li><strong>输出概率值的和应该等于1</strong>，那么我们可以定义$Softmax(X)=g(X)=\frac{f(x)}{\Sigma{f(x)}}$。</li><li><strong>$g(x)$ 是单调的</strong>。变换 $g(x)$ 要能准确的反映输入 $x$ 的相对大小，比如，输入 $x$ 分别是 [1, 2, 3] , 那么输出 $g(x)$ 可以是 [1/6, 2/6, 3/6]。</li><li><strong>函数的输出域是(0,$\infty$)</strong>。考虑直接取 $f(x)=x$，则如果输入当中有负数，概率值就会是负的，显然不合常理。所以需要让每一个概率值都大于0。</li></ol><p>反之，取 $f(x)=e^x$ 能满足上述所有要求，函数是单调的且输出域大于0，从而$Softmax(x)=\frac{e<sup>{x}}{\sum_{i=1}</sup>{n}e^{x}}$。但是符合单调函数且输出域大于0的函数那么多， 为什么没有选用其他的满足条件的函数呢？</p><p>其实，选用$Softmax(x)=\frac{e<sup>{x}}{\sum_{i=1}</sup>{n}e^{x}}$ 是必要的，这样的形式是有理论基础和相关证明的，下面就挑战一下，去理解 Softmax 背后的统计学原理吧。</p><h2 id="softmax-的统计学证明"><a class="header-anchor" href="#softmax-的统计学证明"></a>Softmax 的统计学证明</h2><p>在进行证明前，首先我们需要理解广义线性模型。我们知道线性模型就是$y=W^TX$的形式，代表了对输入向量的线性变换，而如果用 $y=g(W^TX)$ 这样的函数，把线性模型的结果作为参 数，且$g$属于指数分布族，那就是广义线性的。广义线性模型的具体定义如下：</p><h3 id="广义线性模型的具体定义"><a class="header-anchor" href="#广义线性模型的具体定义"></a>广义线性模型的具体定义</h3><ol><li>给定 $x$ 和参数 $\theta$, $y|x$ 满足以 $\eta$ 为变量的指数分布族；</li><li>参数 $\eta=\theta^Tx$；</li><li>给定 $x$, 我们需要预测 $T(y)$, 通常 $T(y)=y$。</li></ol><h3 id="指数分布族的定义"><a class="header-anchor" href="#指数分布族的定义"></a>指数分布族的定义</h3><p>指数分布族是一类概率密度函数可以写成 $P(y;\eta) = b(y) exp(\eta^TT(y)-a(\eta))$形式的分布的总称，正态分布、伯努利分布、多项式分布都属于指数分布族。</p><h3 id="从指数分布族推导对应的广义线性模型"><a class="header-anchor" href="#从指数分布族推导对应的广义线性模型"></a>从指数分布族推导对应的广义线性模型</h3><ol><li>$Y|X;\theta \sim expfamily(\eta)$，假设给定 $X$ 和参数 $\theta$，对应的参数 $Y$ 服从一个以 $\eta$ 为参数的指数分布族分布。</li><li>给定 $X$，目标为 $T(Y)$，通常 $T(Y)=Y$。</li><li>$\eta=\theta^TX$，假设指数分布族的参数是 $X$ 的线性加和。</li><li>根据指数分布族的概率密度函数 $P(y;\eta)=b(y)exp(\eta^TT(y)-a(\eta))$，推导 $\eta$、$b(y)$、$T(y)$、$a(\eta)$。</li><li>根据 $\eta$ 和指数分布族的期望推导 $Y$ 的表达式。</li></ol><h3 id="softmax的推导"><a class="header-anchor" href="#softmax的推导"></a>Softmax的推导</h3><ol><li><p>假设特征到概率服从一个多项式分布，则概率密度函数是$P(Y|X;\phi_1,\phi_2,\dots,\phi_k)=\phi_1^{\Delta(Y=1)} \ast\phi_2^{\Delta(Y=2)} \ast \dots \ast \phi_k^{\Delta(Y=k)}$ ， 其中$\Delta(Y=i)$ 表示输出 $Y$ 值是否等于第 $i$ 个分类，若是，则函数值为 $1$，若不是，则函数值为 $0$ 。</p></li><li><p>用指数分布族的形式代，且$Y(i)=\Delta(Y=i)$，则可以推导出：$$\begin{align}P(Y|X;\phi_1,\phi_2,\dots,\phi_k) &amp;= \phi_1^{T(1)} \ast \phi_2^{T(2)} \ast \dots \ast \phi_k^{T(k)} \\&amp;=exp\left(T(1) \ast log(\phi_1)+T(2) \ast log(\phi_2)+ \dots +(1-\sum_i^{k-1} T(i)) \ast log(\phi_k)\right) \\&amp;=exp\left( T(1) \ast log(\frac{\phi_1}{\phi_k})+T(2) \ast log(\frac{\phi_2}{\phi_k})+ \dots +log(\phi_k) \right) \\&amp;=b(y) exp\left( \eta^TT(y)-a(\eta) \right)\end{align}$$</p></li><li><p>得出$b(y)=1$，$\eta=\left[ log(\frac{\phi_1}{\phi_k}),log(\frac{\phi_2}{\phi_k}),\dots,log(\frac{\phi_{k-1}}{\phi_k}) \right]$，$a(\eta)=-log(\phi_k)$。</p></li><li><p>这个分布的期望是 $E(Y_i|X)=\phi_i$，而 $\eta_i=log(\frac{\phi_i}{\phi_k})$ ，那么可以推出</p></li></ol><p>$$e^\eta_i = \frac{\phi_i}{\phi_k} \\\phi_k \ast e^\eta_i = \phi_i \\\phi_k \ast \sum_{i=1}<sup>{k}e</sup>\eta_i = \sum_{i=1}^{k}{\phi_i} = 1 \\\therefore \phi_i = \frac{e<sup>\eta_i}{\sum_{j=1}</sup>{k}{e^\eta_j}}$$</p><ol start="5"><li>广义线性模型的假设第三条 $\eta=\theta^TX$ ，推导出期望 $E(Y_i|X) = \phi_i =\frac{ e<sup>{\theta_i</sup>TX} }{ \sum_{j=1}<sup>{k}{e</sup>{\theta_j^TX} } }$，就是我们 Softmax 的输出啦！</li></ol><h3 id="reference"><a class="header-anchor" href="#reference"></a>Reference</h3><p>[1] <a href="https://www.cnblogs.com/yinheyi/p/6131262.html" target="_blank" rel="noopener">https://www.cnblogs.com/yinheyi/p/6131262.html</a></p>]]></content>
+    
+    <summary type="html">
+    
+      
+      
+        &lt;p&gt;Softmax层在CNN网络结构中经常放在全连接层后面，做为分类器，输出一个概率值向量。它主要用来进行多分类，形式简单，用一个公式$\frac{e&lt;sup&gt;{x}}{\sum_{i=1}&lt;/sup&gt;{n}e^{x}}$计算，但是为什么是这样的形式呢？&lt;/p&gt;
+&lt;h2 id=
+      
+    
+    </summary>
+    
+    
+  </entry>
+  
+</feed>

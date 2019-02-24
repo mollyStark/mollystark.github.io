@@ -1,0 +1,51 @@
+<!DOCTYPE html><html><head><meta name="generator" content="Hexo 3.8.0"><meta http-equiv="content-type" content="text/html; charset=utf-8"><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" name="viewport"><meta content="yes" name="apple-mobile-web-app-capable"><meta content="black-translucent" name="apple-mobile-web-app-status-bar-style"><meta content="telephone=no" name="format-detection"><meta name="description"><title>numpy operations | 成长的烦恼</title><link rel="stylesheet" type="text/css" href="/css/normalize.css"><link rel="stylesheet" type="text/css" href="/css/highlight.css"><link rel="stylesheet" type="text/css" href="/css/font.css"><link rel="stylesheet" type="text/css" href="/css/noise.css"><link rel="stylesheet" type="text/css" href="//cdn.bootcss.com/font-awesome/4.5.0/css/font-awesome.min.css"><link rel="Shortcut Icon" type="image/x-icon" href="/favicon.ico"><link rel="alternate" type="application/atom+xml" href="/atom.xml"></head><body><article class="wrapper"><div class="post-main"><div class="nav"><nav class="container"><a class="sidebar-nav-item active" href="/">Home</a><a class="sidebar-nav-item" href="/archives">Archives</a></nav><div class="container post-meta"><div class="post-time">2019-01-18</div></div></div><div class="container post-header"><h1>numpy operations</h1></div><div class="container post-toc"><details class="toc"><summary class="toc-accordion">Table of Contents</summary><ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#numpy-的核心-ndarray-对象"><span class="toc-number">1.</span> <span class="toc-text">numpy 的核心－ndarray 对象</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#broadcasting机制"><span class="toc-number">2.</span> <span class="toc-text">Broadcasting机制</span></a></li></ol></details></div><div class="container post-content"><p>Numpy 库是python中进行科学计算的基础包，如果用python去进行矩阵运算，肯定需要用到numpy库，最近在看faster-rcnn的源码，看到了很多numpy矩阵运算的操作，结合
+numpy的manual，这里做一个关于numpy运算的不定期记录和总结。</p>
+<h2 id="numpy-的核心-ndarray-对象"><a class="header-anchor" href="#numpy-的核心-ndarray-对象"></a>numpy 的核心－ndarray 对象</h2>
+<p>ndarray 是numpy里的核心类，封装了对$n$ 维矩阵的各种编译好的操作和方法。ndarray
+数组和python list的区别：</p>
+<ol>
+<li>ndarray中的元素必须在创建时指定大小，而python list是可以动态增长的。</li>
+<li>ndarray中的元素必须属于相同的类型，而python list中的元素不需要。</li>
+<li>ndarray进行大量数据的计算比list效率更高（接近c程序的速度）。</li>
+<li>现在越来越多的库使用numpy作为底层的计算库。</li>
+</ol>
+<p>举个例子，如果要计算矩阵 $A$ 的元素和矩阵 $B$ 的元素相乘，那么在python里，我们需要这样写：</p>
+<figure class="highlight plain"><table><tr><td class="code"><pre><span class="line">C = []</span><br><span class="line">for i in range(len(A)):</span><br><span class="line">    C[i] = A[i] * B[i]</span><br></pre></td></tr></table></figure>
+<p>而使用 numpy 库，我们只需要一句话：</p>
+<figure class="highlight plain"><table><tr><td class="code"><pre><span class="line">C = A * B</span><br></pre></td></tr></table></figure>
+<p>是不是很简洁，就像是写数学公式一样。</p>
+<p>当然上面语句可以运行的一个最简单的前提是：A和B的大小是一样的。在简洁的向量化的语法背后，其实有一些约定好的机制，定义了怎样的运算是被允许的，怎样是不被允许的。</p>
+<h2 id="broadcasting机制"><a class="header-anchor" href="#broadcasting机制"></a>Broadcasting机制</h2>
+<p>在numpy库中，<strong>所有</strong>的运算，包括代数计算，逻辑运算，位运算等等，都是隐式转换成一个元素一个元素的运算的。这个就是Broadcasting机制。所以，上面的运算可以成立，前提是要满足可以隐式扩展成一个元素对一个元素的方式。具体可以用这样两条匹配规则概括：两个矩阵，从最后一维开始往前推，</p>
+<ol>
+<li>两个维度相等，或者</li>
+<li>某一个矩阵的这一维维度是1.</li>
+</ol>
+<p>对于两个矩阵的某一个维度的元素来说，若维度相等，那么元素是可以一一对应的，若维度不相等，但是有一个矩阵维度是1，那么维度是1的那个可以通过复制的方式扩展到另一个矩阵的相应维度，从而达到元素一一对应的效果。</p>
+<p>举个例子，</p>
+<figure class="highlight plain"><table><tr><td class="code"><pre><span class="line">&gt;&gt;&gt; import numpy as np</span><br><span class="line">&gt;&gt;&gt; x = np.array([[1, 2, 3], [4, 5, 6]])</span><br><span class="line">&gt;&gt;&gt; y = np.array([7, 8, 9])</span><br><span class="line">&gt;&gt;&gt; x + y</span><br><span class="line">array([[ 8, 10, 12],</span><br><span class="line">       [11, 13, 15]])</span><br></pre></td></tr></table></figure>
+<p>x是一个大小为（2， 3）的矩阵，而y的大小是（1， 3），从后往前看维度信息，最后一维都是3，是满足条件的，然后第一维y的维度是1，因此也满足条件，最后加法的效果就相当于把y数组拷贝了一行[7, 8, 9]与x相加。</p>
+<p>当然，实际上，numpy并没有真的进行数组的拷贝，否则数组一大，就会有空间上的巨大开销，上面所说的复制的方式都是一种便于理解的说法，而numpy其实是用了一种记录strides的trick
+去扩展数组而不过度的占用存储空间的。</p>
+<p>底层实现是在nditer类用c代码实现的，但是我们可以在python中通过 <code>np.lib.stride_tricks</code> 里的方法来看一下是怎么进行broadcast的。</p>
+<figure class="highlight plain"><table><tr><td class="code"><pre><span class="line"># 得到broadcast后的数组A和B</span><br><span class="line">&gt;&gt;&gt; A,B=np.lib.stride_tricks.broadcast_arrays(np.arange(6).reshape(2,3),</span><br><span class="line">...                                       np.array([[1],[2]]))</span><br><span class="line">&gt;&gt;&gt; A</span><br><span class="line">array([[0, 1, 2],</span><br><span class="line">       [3, 4, 5]])</span><br><span class="line">&gt;&gt;&gt; B</span><br><span class="line">array([[1, 1, 1],</span><br><span class="line">       [2, 2, 2]])</span><br><span class="line"></span><br><span class="line"># A的shape和strides, 说明数组A从第一维的第一个元素到第一维的第二个元素需要跳过24bytes的offset</span><br><span class="line">，也就是第二维的元素个数*每个元素的大小（3*8），而从第二维的第一个元素到第二维的第二个元素需要</span><br><span class="line">跳过8bytes的offset，也就是一个元素的大小。</span><br><span class="line">&gt;&gt;&gt; A.shape, A.strides</span><br><span class="line">((2, 3), (24, 8))</span><br><span class="line"></span><br><span class="line"># B的shape和strides，说明数组B从第一维的第一个元素到第一维的第二个元素需要跳过8bytes的offset</span><br><span class="line">，也就是第二维的真实元素个数1*每个元素的大小8bytes，而从第二维的第一个元素到第二维的第二个元素</span><br><span class="line">没有offset，就是还是这个元素，说明底层numpy并没有真的将数组进行拷贝复制。</span><br><span class="line">&gt;&gt;&gt; B.shape, B.strides</span><br><span class="line">((2, 3), (8, 0))</span><br></pre></td></tr></table></figure>
+<p>上面的例子中，一个元素占用的内存是8字节，B虽然也是shape为(2, 3)的数组，但是它的strides是(8, 0)，通过shape和strides的组合，数组可以通过一种“虚拟”的方式扩展维度。</p>
+</div></div><script type="text/x-mathjax-config">
+   MathJax.Hub.Config({"HTML-CSS": { preferredFont: "TeX", availableFonts: ["STIX","TeX"], linebreaks: { automatic:true }, EqnChunk: (MathJax.Hub.Browser.isMobile ? 10 : 50) },
+        tex2jax: { inlineMath: [ ["$", "$"], ["\\(","\\)"] ], processEscapes: true, ignoreClass: "tex2jax_ignore|dno",skipTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']},
+        TeX: {  noUndefined: { attributes: { mathcolor: "red", mathbackground: "#FFEEEE", mathsize: "90%" } }, Macros: { href: "{}" } },
+        messageStyle: "none"
+    }); 
+</script>
+<script type="text/x-mathjax-config">
+    MathJax.Hub.Queue(function() {
+        var all = MathJax.Hub.getAllJax(), i;
+        for(i=0; i < all.length; i += 1) {
+            all[i].SourceElement().parentNode.className += ' has-jax';
+        }
+    });
+</script>
+<script type="text/javascript" src="https://cdn.bootcss.com/mathjax/2.7.2/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script><div class="post-main post-comment"></div></article><link rel="stylesheet" type="text/css" href="//cdn.bootcss.com/fancybox/2.1.5/jquery.fancybox.css"><script src="//cdn.bootcss.com/jquery/2.0.3/jquery.min.js"></script><script src="//cdn.bootcss.com/fancybox/2.1.5/jquery.fancybox.pack.js"></script><script>$(document).ready(function() {
+  $(".fancybox").fancybox();
+});
+</script></body></html>

@@ -1,0 +1,92 @@
+<!DOCTYPE html><html><head><meta name="generator" content="Hexo 3.8.0"><meta http-equiv="content-type" content="text/html; charset=utf-8"><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" name="viewport"><meta content="yes" name="apple-mobile-web-app-capable"><meta content="black-translucent" name="apple-mobile-web-app-status-bar-style"><meta content="telephone=no" name="format-detection"><meta name="description"><title>understanding Softmax in CNN | 成长的烦恼</title><link rel="stylesheet" type="text/css" href="/css/normalize.css"><link rel="stylesheet" type="text/css" href="/css/highlight.css"><link rel="stylesheet" type="text/css" href="/css/font.css"><link rel="stylesheet" type="text/css" href="/css/noise.css"><link rel="stylesheet" type="text/css" href="//cdn.bootcss.com/font-awesome/4.5.0/css/font-awesome.min.css"><link rel="Shortcut Icon" type="image/x-icon" href="/favicon.ico"><link rel="alternate" type="application/atom+xml" href="/atom.xml"></head><body><article class="wrapper"><div class="post-main"><div class="nav"><nav class="container"><a class="sidebar-nav-item active" href="/">Home</a><a class="sidebar-nav-item" href="/archives">Archives</a></nav><div class="container post-meta"><div class="post-time">2018-11-18</div></div></div><div class="container post-header"><h1>understanding Softmax in CNN</h1></div><div class="container post-toc"><details class="toc"><summary class="toc-accordion">Table of Contents</summary><ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#直观的理解方式"><span class="toc-number">1.</span> <span class="toc-text">直观的理解方式</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#softmax-的统计学证明"><span class="toc-number">2.</span> <span class="toc-text">Softmax 的统计学证明</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#广义线性模型的具体定义"><span class="toc-number">2.1.</span> <span class="toc-text">广义线性模型的具体定义</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#指数分布族的定义"><span class="toc-number">2.2.</span> <span class="toc-text">指数分布族的定义</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#从指数分布族推导对应的广义线性模型"><span class="toc-number">2.3.</span> <span class="toc-text">从指数分布族推导对应的广义线性模型</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#softmax的推导"><span class="toc-number">2.4.</span> <span class="toc-text">Softmax的推导</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#reference"><span class="toc-number">2.5.</span> <span class="toc-text">Reference</span></a></li></ol></li></ol></details></div><div class="container post-content"><p>Softmax层在CNN网络结构中经常放在全连接层后面，做为分类器，输出一个概率值向量。它主要用来进行多分类，形式简单，用一个公式$\frac{e<sup>{x}}{\sum_{i=1}</sup>{n}e^{x}}$计算，但是为什么是这样的形式呢？</p>
+<h2 id="直观的理解方式"><a class="header-anchor" href="#直观的理解方式"></a>直观的理解方式</h2>
+<p>首先，Softmax层的作用就是，将一个特征向量变成一个概率值向量。比如一幅图片，在经过卷积层以 后，得到一个特征向量，这个特征向量可以认为是输入的一种表示方法，然后经过Softmax层，对应到输出概率，这个输出概率的大小能反映出输入属于 哪种分类的概率最大。</p>
+<p>这种将一个向量转换成概率向量的变换需要满足一些条件，</p>
+<ol>
+<li><strong>输出概率值的和应该等于1</strong>，那么我们可以定义
+$Softmax(X)=g(X)=\frac{f(x)}{\Sigma{f(x)}}$。</li>
+<li><strong>$g(x)$ 是单调的</strong>。变换 $g(x)$ 要能准确的反映输入 $x$ 的相对大小，比如，输入 $x$ 分别是 [1, 2, 3] , 那么输出 $g(x)$ 可以是 [1/6, 2/6, 3/6]。</li>
+<li><strong>函数的输出域是(0,$\infty$)</strong>。考虑直接取 $f(x)=x$，则如果输入当中有负数，概率值就会是负的，显然不合常理。所以需要让每一个概率值都大于0。</li>
+</ol>
+<p>反之，取 $f(x)=e^x$ 能满足上述所有要求，函数是单调的且输出域大于0，从而
+$Softmax(x)=\frac{e<sup>{x}}{\sum_{i=1}</sup>{n}e^{x}}$。但是符合单调函数且输出域大于0
+的函数那么多， 为什么没有选用其他的满足条件的函数呢？</p>
+<p>其实，选用$Softmax(x)=\frac{e<sup>{x}}{\sum_{i=1}</sup>{n}e^{x}}$ 是必要的，这样的形式是有理论基础和相关证明的，下面就挑战一下，去理解 Softmax 背后的统计学原理吧。</p>
+<h2 id="softmax-的统计学证明"><a class="header-anchor" href="#softmax-的统计学证明"></a>Softmax 的统计学证明</h2>
+<p>在进行证明前，首先我们需要理解广义线性模型。我们知道线性模型就是$y=W^TX$的形式，代表了对输入向量的线性变换，而如果用 $y=g(W^TX)$ 这样的函数，把线性模型的结果作为参 数，且$g$属于指数分布族，那就是广义线性的。广义线性模型的具体定义如下：</p>
+<h3 id="广义线性模型的具体定义"><a class="header-anchor" href="#广义线性模型的具体定义"></a>广义线性模型的具体定义</h3>
+<ol>
+<li>给定 $x$ 和参数 $\theta$, $y|x$ 满足以 $\eta$ 为变量的指数分布族；</li>
+<li>参数 $\eta=\theta^Tx$；</li>
+<li>给定 $x$, 我们需要预测 $T(y)$, 通常 $T(y)=y$。</li>
+</ol>
+<h3 id="指数分布族的定义"><a class="header-anchor" href="#指数分布族的定义"></a>指数分布族的定义</h3>
+<p>指数分布族是一类概率密度函数可以写成 $P(y;\eta) = b(y) exp(\eta^TT(y)-a(\eta))$
+形式的分布的总称，正态分布、伯努利分布、多项式分布都属于指数分布族。</p>
+<h3 id="从指数分布族推导对应的广义线性模型"><a class="header-anchor" href="#从指数分布族推导对应的广义线性模型"></a>从指数分布族推导对应的广义线性模型</h3>
+<ol>
+<li>$Y|X;\theta \sim expfamily(\eta)$，假设给定 $X$ 和参数 $\theta$，对应的参数 $Y$ 服从一个以 $\eta$ 为参数的指数分布族分布。</li>
+<li>给定 $X$，目标为 $T(Y)$，通常 $T(Y)=Y$。</li>
+<li>$\eta=\theta^TX$，假设指数分布族的参数是 $X$ 的线性加和。</li>
+<li>根据指数分布族的概率密度函数 $P(y;\eta)=b(y)exp(\eta^TT(y)-a(\eta))$，推导 $\eta$、$b(y)$、$T(y)$、$a(\eta)$。</li>
+<li>根据 $\eta$ 和指数分布族的期望推导 $Y$ 的表达式。</li>
+</ol>
+<h3 id="softmax的推导"><a class="header-anchor" href="#softmax的推导"></a>Softmax的推导</h3>
+<ol>
+<li>
+<p>假设特征到概率服从一个多项式分布，则概率密度函数是
+$P(Y|X;\phi_1,\phi_2,\dots,\phi_k)=\phi_1^{\Delta(Y=1)} \ast
+\phi_2^{\Delta(Y=2)} \ast \dots \ast \phi_k^{\Delta(Y=k)}$ ， 其中
+$\Delta(Y=i)$ 表示输出 $Y$ 值是否等于第 $i$ 个分类，若是，则函数值为 $1$
+，若不是，则函数值为 $0$ 。</p>
+</li>
+<li>
+<p>用指数分布族的形式代，且$Y(i)=\Delta(Y=i)$，则可以推导出：
+$$
+\begin{align}
+P(Y|X;\phi_1,\phi_2,\dots,\phi_k) &amp;= \phi_1^{T(1)} \ast \phi_2^{T(2)} \ast \dots \ast \phi_k^{T(k)} \\
+&amp;=exp\left(T(1) \ast log(\phi_1)+T(2) \ast log(\phi_2)+ \dots +(1-\sum_i^{k-1} T(i)) \ast log(\phi_k)\right) \\
+&amp;=exp\left( T(1) \ast log(\frac{\phi_1}{\phi_k})+T(2) \ast log(\frac{\phi_2}{\phi_k})+ \dots +log(\phi_k) \right) \\
+&amp;=b(y) exp\left( \eta^TT(y)-a(\eta) \right)
+\end{align}
+$$</p>
+</li>
+<li>
+<p>得出$b(y)=1$，$\eta=\left[ log(\frac{\phi_1}{\phi_k}),log(\frac{\phi_2}{\phi_k}),\dots,log(\frac{\phi_{k-1}}{\phi_k}) \right]$，$a(\eta)=-log(\phi_k)$。</p>
+</li>
+<li>
+<p>这个分布的期望是 $E(Y_i|X)=\phi_i$，而 $\eta_i=log(\frac{\phi_i}{\phi_k})$ ，那么可以推出</p>
+</li>
+</ol>
+<p>$$
+e^\eta_i = \frac{\phi_i}{\phi_k} \\
+\phi_k \ast e^\eta_i = \phi_i \\
+\phi_k \ast \sum_{i=1}<sup>{k}e</sup>\eta_i = \sum_{i=1}^{k}{\phi_i} = 1 \\
+\therefore \phi_i = \frac{e<sup>\eta_i}{\sum_{j=1}</sup>{k}{e^\eta_j}}
+$$</p>
+<ol start="5">
+<li>广义线性模型的假设第三条 $\eta=\theta^TX$ ，推导出期望 $E(Y_i|X) = \phi_i =
+\frac{ e<sup>{\theta_i</sup>TX} }{ \sum_{j=1}<sup>{k}{e</sup>{\theta_j^TX} } }$
+，就是我们 Softmax 的输出啦！</li>
+</ol>
+<h3 id="reference"><a class="header-anchor" href="#reference"></a>Reference</h3>
+<p>[1] <a href="https://www.cnblogs.com/yinheyi/p/6131262.html" target="_blank" rel="noopener">https://www.cnblogs.com/yinheyi/p/6131262.html</a></p>
+</div></div><script type="text/x-mathjax-config">
+   MathJax.Hub.Config({"HTML-CSS": { preferredFont: "TeX", availableFonts: ["STIX","TeX"], linebreaks: { automatic:true }, EqnChunk: (MathJax.Hub.Browser.isMobile ? 10 : 50) },
+        tex2jax: { inlineMath: [ ["$", "$"], ["\\(","\\)"] ], processEscapes: true, ignoreClass: "tex2jax_ignore|dno",skipTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']},
+        TeX: {  noUndefined: { attributes: { mathcolor: "red", mathbackground: "#FFEEEE", mathsize: "90%" } }, Macros: { href: "{}" } },
+        messageStyle: "none"
+    }); 
+</script>
+<script type="text/x-mathjax-config">
+    MathJax.Hub.Queue(function() {
+        var all = MathJax.Hub.getAllJax(), i;
+        for(i=0; i < all.length; i += 1) {
+            all[i].SourceElement().parentNode.className += ' has-jax';
+        }
+    });
+</script>
+<script type="text/javascript" src="https://cdn.bootcss.com/mathjax/2.7.2/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script><div class="post-main post-comment"></div></article><link rel="stylesheet" type="text/css" href="//cdn.bootcss.com/fancybox/2.1.5/jquery.fancybox.css"><script src="//cdn.bootcss.com/jquery/2.0.3/jquery.min.js"></script><script src="//cdn.bootcss.com/fancybox/2.1.5/jquery.fancybox.pack.js"></script><script>$(document).ready(function() {
+  $(".fancybox").fancybox();
+});
+</script></body></html>
